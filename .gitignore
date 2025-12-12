@@ -27,3 +27,6 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+
+# Data storage
+data/

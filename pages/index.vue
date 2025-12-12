@@ -42,30 +42,35 @@
 </template>
 
 <script setup>
+const { fetchBoards } = useBoards()
+
 const stats = ref({
   totalBoards: 0,
   totalTasks: 0,
   completedTasks: 0
 });
 
-// In a real app, this would fetch from an API
-onMounted(() => {
-  // Load stats from localStorage or API
-  const boards = JSON.parse(localStorage.getItem('boards') || '[]');
-  stats.value.totalBoards = boards.length;
+// Fetch stats from the server API
+onMounted(async () => {
+  try {
+    const boards = await fetchBoards();
+    stats.value.totalBoards = boards.length;
 
-  let totalTasks = 0;
-  let completedTasks = 0;
+    let totalTasks = 0;
+    let completedTasks = 0;
 
-  boards.forEach(board => {
-    if (board.tasks) {
-      totalTasks += board.tasks.length;
-      completedTasks += board.tasks.filter(t => t.status === 'done').length;
-    }
-  });
+    boards.forEach(board => {
+      if (board.tasks) {
+        totalTasks += board.tasks.length;
+        completedTasks += board.tasks.filter(t => t.status === 'done').length;
+      }
+    });
 
-  stats.value.totalTasks = totalTasks;
-  stats.value.completedTasks = completedTasks;
+    stats.value.totalTasks = totalTasks;
+    stats.value.completedTasks = completedTasks;
+  } catch (error) {
+    console.error('Failed to load stats:', error);
+  }
 });
 </script>
 

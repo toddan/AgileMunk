@@ -9,8 +9,19 @@
       </div>
     </div>
 
+    <!-- Loading State -->
+    <div v-if="loading" class="card text-center">
+      <p>Loading boards...</p>
+    </div>
+
+    <!-- Error State -->
+    <div v-else-if="error" class="card text-center">
+      <p style="color: #e74c3c;">Error: {{ error }}</p>
+      <button class="btn btn-primary mt-1" @click="loadBoards">Retry</button>
+    </div>
+
     <!-- Boards List -->
-    <div v-if="boards.length === 0" class="card text-center">
+    <div v-else-if="boards.length === 0" class="card text-center">
       <p>No boards yet. Create your first board to get started!</p>
     </div>
 
@@ -18,11 +29,12 @@
       <div v-for="board in boards" :key="board.id" class="card">
         <h3>{{ board.name }}</h3>
         <p>{{ board.description }}</p>
+        <div class="task-count">{{ board.tasks?.length || 0 }} tasks</div>
         <div class="mt-1">
           <button class="btn btn-primary" @click="selectBoard(board)">
             Open Board
           </button>
-          <button class="btn btn-danger" @click="deleteBoard(board.id)" style="margin-left: 0.5rem;">
+          <button class="btn btn-danger" @click="handleDeleteBoard(board.id)" style="margin-left: 0.5rem;">
             Delete
           </button>
         </div>
@@ -42,7 +54,9 @@
           <textarea v-model="newBoard.description" placeholder="Enter description"></textarea>
         </div>
         <div class="flex gap-1">
-          <button class="btn btn-success" @click="createBoard">Create</button>
+          <button class="btn btn-success" @click="handleCreateBoard" :disabled="loading">
+            {{ loading ? 'Creating...' : 'Create' }}
+          </button>
           <button class="btn" @click="showNewBoardModal = false">Cancel</button>
         </div>
       </div>
@@ -53,7 +67,7 @@
       <div class="modal-content modal-large">
         <div class="flex justify-between align-center mb-2">
           <h2>{{ selectedBoard.name }}</h2>
-          <button class="btn" @click="selectedBoard = null">Close</button>
+          <button class="btn" @click="closeBoard">Close</button>
         </div>
 
         <button class="btn btn-success mb-2" @click="showNewTaskModal = true">
@@ -71,15 +85,17 @@
               <h4>{{ task.title }}</h4>
               <p>{{ task.description }}</p>
               <div class="task-meta">
-                <span>Priority: {{ task.priority }}</span>
+                <span :class="`priority-badge badge-${task.priority}`">
+                  {{ task.priority }}
+                </span>
               </div>
               <div class="mt-1">
-                <select @change="updateTaskStatus(task.id, $event.target.value)" :value="task.status">
+                <select @change="handleUpdateTaskStatus(task.id, $event.target.value)" :value="task.status">
                   <option v-for="s in statuses" :key="s.id" :value="s.id">
                     {{ s.name }}
                   </option>
                 </select>
-                <button class="btn btn-danger" @click="deleteTask(task.id)" style="margin-left: 0.5rem; font-size: 0.8rem; padding: 0.25rem 0.5rem;">
+                <button class="btn btn-danger" @click="handleDeleteTask(task.id)" style="margin-left: 0.5rem; font-size: 0.8rem; padding: 0.25rem 0.5rem;">
                   Delete
                 </button>
               </div>
@@ -118,7 +134,9 @@
           </select>
         </div>
         <div class="flex gap-1">
-          <button class="btn btn-success" @click="createTask">Create</button>
+          <button class="btn btn-success" @click="handleCreateTask" :disabled="taskLoading">
+            {{ taskLoading ? 'Creating...' : 'Create' }}
+          </button>
           <button class="btn" @click="showNewTaskModal = false">Cancel</button>
         </div>
       </div>
@@ -127,124 +145,164 @@
 </template>
 
 <script setup>
-const boards = ref([]);
-const selectedBoard = ref(null);
-const showNewBoardModal = ref(false);
-const showNewTaskModal = ref(false);
+const { boards, loading, error, fetchBoards, createBoard, deleteBoard } = useBoards()
+
+const selectedBoard = ref(null)
+const taskLoading = ref(false)
+const showNewBoardModal = ref(false)
+const showNewTaskModal = ref(false)
 
 const newBoard = ref({
   name: '',
   description: ''
-});
+})
 
 const newTask = ref({
   title: '',
   description: '',
   priority: 'medium',
   status: 'todo'
-});
+})
 
 const statuses = [
   { id: 'todo', name: 'To Do' },
   { id: 'in-progress', name: 'In Progress' },
   { id: 'done', name: 'Done' }
-];
+]
 
-// Load boards from localStorage
-onMounted(() => {
-  const savedBoards = localStorage.getItem('boards');
-  if (savedBoards) {
-    boards.value = JSON.parse(savedBoards);
+// Load boards on mount
+onMounted(async () => {
+  await loadBoards()
+})
+
+const loadBoards = async () => {
+  try {
+    await fetchBoards()
+  } catch (err) {
+    console.error('Failed to load boards:', err)
   }
-});
+}
 
-// Save boards to localStorage
-const saveBoards = () => {
-  localStorage.setItem('boards', JSON.stringify(boards.value));
-};
-
-const createBoard = () => {
+const handleCreateBoard = async () => {
   if (!newBoard.value.name) {
-    alert('Please enter a board name');
-    return;
+    alert('Please enter a board name')
+    return
   }
 
-  const board = {
-    id: Date.now(),
-    name: newBoard.value.name,
-    description: newBoard.value.description,
-    tasks: []
-  };
+  try {
+    await createBoard(newBoard.value)
+    newBoard.value = { name: '', description: '' }
+    showNewBoardModal.value = false
+  } catch (err) {
+    alert('Failed to create board: ' + err.message)
+  }
+}
 
-  boards.value.push(board);
-  saveBoards();
-
-  newBoard.value = { name: '', description: '' };
-  showNewBoardModal.value = false;
-};
-
-const deleteBoard = (id) => {
+const handleDeleteBoard = async (id) => {
   if (confirm('Are you sure you want to delete this board?')) {
-    boards.value = boards.value.filter(b => b.id !== id);
-    saveBoards();
+    try {
+      await deleteBoard(id)
+    } catch (err) {
+      alert('Failed to delete board: ' + err.message)
+    }
   }
-};
+}
 
-const selectBoard = (board) => {
-  selectedBoard.value = board;
-};
+const selectBoard = async (board) => {
+  selectedBoard.value = board
+}
+
+const closeBoard = async () => {
+  // Refresh the board data to get latest tasks
+  if (selectedBoard.value) {
+    try {
+      const { fetchBoard } = useBoards()
+      const updatedBoard = await fetchBoard(selectedBoard.value.id)
+      selectedBoard.value = updatedBoard
+      // Update the board in the list
+      const index = boards.value.findIndex(b => b.id === updatedBoard.id)
+      if (index !== -1) {
+        boards.value[index] = updatedBoard
+      }
+    } catch (err) {
+      console.error('Failed to refresh board:', err)
+    }
+  }
+  selectedBoard.value = null
+}
 
 const getTasksByStatus = (status) => {
   if (!selectedBoard.value || !selectedBoard.value.tasks) {
-    return [];
+    return []
   }
-  return selectedBoard.value.tasks.filter(t => t.status === status);
-};
+  return selectedBoard.value.tasks.filter(t => t.status === status)
+}
 
-const createTask = () => {
+const handleCreateTask = async () => {
   if (!newTask.value.title) {
-    alert('Please enter a task title');
-    return;
+    alert('Please enter a task title')
+    return
   }
 
-  const task = {
-    id: Date.now(),
-    title: newTask.value.title,
-    description: newTask.value.description,
-    priority: newTask.value.priority,
-    status: newTask.value.status
-  };
+  taskLoading.value = true
+  try {
+    const { createTask } = useTasks(selectedBoard.value.id)
+    const createdTask = await createTask(newTask.value)
 
-  if (!selectedBoard.value.tasks) {
-    selectedBoard.value.tasks = [];
+    // Update the local board with the new task
+    if (!selectedBoard.value.tasks) {
+      selectedBoard.value.tasks = []
+    }
+    selectedBoard.value.tasks.push(createdTask)
+
+    newTask.value = {
+      title: '',
+      description: '',
+      priority: 'medium',
+      status: 'todo'
+    }
+    showNewTaskModal.value = false
+  } catch (err) {
+    alert('Failed to create task: ' + err.message)
+  } finally {
+    taskLoading.value = false
   }
+}
 
-  selectedBoard.value.tasks.push(task);
-  saveBoards();
+const handleUpdateTaskStatus = async (taskId, newStatus) => {
+  taskLoading.value = true
+  try {
+    const { updateTask } = useTasks(selectedBoard.value.id)
+    const updatedTask = await updateTask(taskId, { status: newStatus })
 
-  newTask.value = {
-    title: '',
-    description: '',
-    priority: 'medium',
-    status: 'todo'
-  };
-  showNewTaskModal.value = false;
-};
-
-const updateTaskStatus = (taskId, newStatus) => {
-  const task = selectedBoard.value.tasks.find(t => t.id === taskId);
-  if (task) {
-    task.status = newStatus;
-    saveBoards();
+    // Update the local task
+    const taskIndex = selectedBoard.value.tasks.findIndex(t => t.id === taskId)
+    if (taskIndex !== -1) {
+      selectedBoard.value.tasks[taskIndex] = updatedTask
+    }
+  } catch (err) {
+    alert('Failed to update task: ' + err.message)
+  } finally {
+    taskLoading.value = false
   }
-};
+}
 
-const deleteTask = (taskId) => {
+const handleDeleteTask = async (taskId) => {
   if (confirm('Are you sure you want to delete this task?')) {
-    selectedBoard.value.tasks = selectedBoard.value.tasks.filter(t => t.id !== taskId);
-    saveBoards();
+    taskLoading.value = true
+    try {
+      const { deleteTask } = useTasks(selectedBoard.value.id)
+      await deleteTask(taskId)
+
+      // Remove from local board
+      selectedBoard.value.tasks = selectedBoard.value.tasks.filter(t => t.id !== taskId)
+    } catch (err) {
+      alert('Failed to delete task: ' + err.message)
+    } finally {
+      taskLoading.value = false
+    }
   }
-};
+}
 </script>
 
 <style scoped>
@@ -280,5 +338,34 @@ select {
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 0.9rem;
+}
+
+.task-count {
+  font-size: 0.9rem;
+  color: #666;
+  margin-top: 0.5rem;
+}
+
+.priority-badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-high {
+  background: #fee;
+  color: #e74c3c;
+}
+
+.badge-medium {
+  background: #fef5e7;
+  color: #f39c12;
+}
+
+.badge-low {
+  background: #ecf0f1;
+  color: #95a5a6;
 }
 </style>
